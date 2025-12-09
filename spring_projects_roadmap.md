@@ -33,7 +33,7 @@
   - Use @Query with named parameters
 
 ### API Design
-- [ ] **RESTful Endpoints**
+- [x] **RESTful Endpoints**
   ```
   POST   /api/users          - Create
   GET    /api/users/{id}     - Read
@@ -42,18 +42,18 @@
   DELETE /api/users/{id}     - Delete
   ```
 
-- [ ] **Request/Response DTOs**
+- [x] **Request/Response DTOs**
   - Create separate DTOs for requests and responses
   - Use MapStruct for entity-DTO mapping
   - Add validation annotations (@NotNull, @Email, @Size)
 
-- [ ] **Exception Handling**
+- [x] **Exception Handling**
   - Create @ControllerAdvice class
   - Handle common exceptions (ResourceNotFoundException, ValidationException)
   - Return consistent error format
 
 ### Code Quality
-- [ ] **Project Structure**
+- [x] **Project Structure**
   ```
   src/main/java/com/project/
   ├── controller/
@@ -77,7 +77,7 @@
 ## Week 2: JWT Authentication & Advanced API Design
 
 ### Security Implementation
-- [ ] **JWT Token Authentication**
+- [x] **JWT Token Authentication**
   - Create JWT utility class (generate, validate, extract claims)
   - Implement JwtAuthenticationFilter
   - Add login endpoint returning JWT
