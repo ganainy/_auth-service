@@ -11,10 +11,10 @@
 ## Week 1: Setup & Basic Security
 
 ### Tasks
-- [ ] Initialize Spring Boot projects (start.spring.io)
-- [ ] Setup PostgreSQL/MySQL databases
-- [ ] Create basic entity models (User, Product/Patient, Order/Appointment)
-- [ ] Implement basic CRUD operations
+- [x] Initialize Spring Boot projects (start.spring.io)
+- [x] Setup PostgreSQL/MySQL databases
+- [x] Create basic entity models (User, Product/Patient, Order/Appointment)
+- [x] Implement basic CRUD operations
 
 ### Security Implementation
 - [ ] **Spring Security basic setup**
@@ -66,7 +66,7 @@
   └── config/
   ```
 
-- [ ] **Lombok Setup**
+- [x] **Lombok Setup**
   - Add @Data, @Builder, @NoArgsConstructor, @AllArgsConstructor
   - Use @Slf4j for logging
 
