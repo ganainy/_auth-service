@@ -1,5 +1,7 @@
 package com.ganainy.authservice.controller;
 
+import com.ganainy.authservice.model.dto.CreateUserRequest;
+import com.ganainy.authservice.model.dto.UserResponse;
 import com.ganainy.authservice.model.entity.User;
 import com.ganainy.authservice.service.UserService;
 
@@ -15,6 +17,7 @@ import org.springframework.web.bind.annotation.*;
 import jakarta.validation.Valid;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * UserController - REST API endpoints for User management.
@@ -137,15 +140,27 @@ public class UserController {
      *        }
      */
     @PostMapping
-    public ResponseEntity<User> createUser(@Valid @RequestBody User user) {
-        log.info("REST request to create user: {}", user.getEmail());
+    public ResponseEntity<UserResponse> createUser(@Valid @RequestBody CreateUserRequest request) {
+        log.info("REST request to create user: {}", request.email());
+
+        // Convert DTO to Entity
+        // Note: We only set the fields the client is allowed to provide
+        // Role, enabled, etc. are set to defaults by the entity
+        User user = new User();
+        user.setEmail(request.email());
+        user.setPassword(request.password());
+        user.setFirstName(request.firstName());
+        user.setLastName(request.lastName());
 
         User createdUser = userService.createUser(user);
+
+        // Convert Entity to Response DTO (hides password hash)
+        UserResponse response = UserResponse.fromEntity(createdUser);
 
         // Return 201 Created with the created user in the body
         return ResponseEntity
                 .status(HttpStatus.CREATED) // 201
-                .body(createdUser);
+                .body(response);
     }
 
     /**
@@ -171,12 +186,12 @@ public class UserController {
      *               Or (404 Not Found) if user doesn't exist.
      */
     @GetMapping("/{id}")
-    public ResponseEntity<User> getUserById(@PathVariable Long id) {
+    public ResponseEntity<UserResponse> getUserById(@PathVariable Long id) {
         log.info("REST request to get user by ID: {}", id);
 
         return userService.findUserById(id)
-                // If found, return 200 OK with user
-                .map(user -> ResponseEntity.ok(user))
+                // If found, convert to DTO and return 200 OK
+                .map(user -> ResponseEntity.ok(UserResponse.fromEntity(user)))
                 // If not found, return 404 Not Found
                 .orElse(ResponseEntity.notFound().build());
     }
@@ -201,10 +216,12 @@ public class UserController {
      * ]
      */
     @GetMapping
-    public ResponseEntity<List<User>> getAllUsers() {
+    public ResponseEntity<List<UserResponse>> getAllUsers() {
         log.info("REST request to get all users");
 
-        List<User> users = userService.findAllUsers();
+        List<UserResponse> users = userService.findAllUsers().stream()
+                .map(UserResponse::fromEntity)
+                .collect(Collectors.toList());
         return ResponseEntity.ok(users);
     }
 

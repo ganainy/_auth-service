@@ -8,6 +8,7 @@ import com.ganainy.authservice.service.UserService;
 import lombok.extern.slf4j.Slf4j;
 
 // Spring annotations for dependency injection and transaction management
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -96,10 +97,27 @@ public class UserServiceImpl implements UserService {
      */
     private final UserRepository userRepository;
 
-    // Constructor injection - UserRepository is automatically injected by Spring
-    // Note: @Autowired is optional for constructors since Spring 4.3
-    public UserServiceImpl(UserRepository userRepository) {
+    /**
+     * =====================================================
+     * PASSWORD ENCODER
+     * =====================================================
+     * 
+     * We inject the PasswordEncoder to hash passwords before storing.
+     * The actual implementation (BCryptPasswordEncoder) is defined in
+     * SecurityConfig.
+     * 
+     * This is the Dependency Inversion Principle in action:
+     * - We depend on the abstraction (PasswordEncoder interface)
+     * - Not the concrete implementation (BCryptPasswordEncoder)
+     * - Easy to swap implementations or mock in tests
+     */
+    private final PasswordEncoder passwordEncoder;
+
+    // Constructor injection - both dependencies are automatically injected by
+    // Spring
+    public UserServiceImpl(UserRepository userRepository, PasswordEncoder passwordEncoder) {
         this.userRepository = userRepository;
+        this.passwordEncoder = passwordEncoder;
     }
 
     /**
@@ -117,6 +135,24 @@ public class UserServiceImpl implements UserService {
             log.warn("Attempted to create user with existing email: {}", user.getEmail());
             throw new IllegalArgumentException("Email already exists: " + user.getEmail());
         }
+
+        // =====================================================
+        // HASH THE PASSWORD BEFORE STORING
+        // =====================================================
+        //
+        // The password comes in as plain text from the request.
+        // We MUST hash it before saving to the database!
+        //
+        // passwordEncoder.encode() does:
+        // "MyPassword123" → "$2a$10$N9qo8uLOickgx2ZMRZoMye..."
+        //
+        // This hash is:
+        // - One-way (can't be reversed)
+        // - Salted (same password = different hash each time)
+        // - Slow (prevents brute force attacks)
+        String hashedPassword = passwordEncoder.encode(user.getPassword());
+        user.setPassword(hashedPassword);
+        log.debug("Password hashed successfully for user: {}", user.getEmail());
 
         // Save the user to the database
         // JPA will:

@@ -17,17 +17,17 @@
 - [x] Implement basic CRUD operations
 
 ### Security Implementation
-- [ ] **Spring Security basic setup**
+- [x] **Spring Security basic setup**
   - Configure SecurityFilterChain
   - Password encoding with BCryptPasswordEncoder
   - In-memory user details for testing
   
-- [ ] **Input Validation**
+- [x] **Input Validation**
   - Add @Valid and @Validated annotations
   - Create custom validators
   - Bean Validation (JSR-380) with constraints
 
-- [ ] **SQL Injection Prevention**
+- [x] **SQL Injection Prevention**
   - Use Spring Data JPA (automatic parameterization)
   - Never concatenate SQL strings
   - Use @Query with named parameters
