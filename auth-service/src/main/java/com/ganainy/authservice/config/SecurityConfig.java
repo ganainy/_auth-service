@@ -1,157 +1,173 @@
 package com.ganainy.authservice.config;
 
+import com.ganainy.authservice.security.JwtAuthenticationFilter;
+import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.AuthenticationProvider;
+import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 /**
- * SecurityConfig - Configuration class for security-related beans.
+ * SecurityConfig - Complete Spring Security configuration with JWT.
  * 
  * =====================================================
- * WHAT IS @Configuration?
+ * WHAT CHANGED FROM WEEK 1?
  * =====================================================
  * 
- * @Configuration marks this class as a SOURCE OF BEAN DEFINITIONS.
+ * Week 1: permitAll() for everything (no authentication)
+ * Week 2: Proper JWT-based authentication with protected endpoints
  * 
- *                Think of it as a "factory" that tells Spring:
- *                "Here are some objects I want you to create and manage."
+ * Key additions:
+ * 1. JwtAuthenticationFilter - Validates JWT on every request
+ * 2. AuthenticationManager - Handles login credential verification
+ * 3. AuthenticationProvider - Connects UserDetailsService + PasswordEncoder
+ * 4. SessionCreationPolicy.STATELESS - No server-side sessions (JWT is
+ * stateless)
+ * 5. @EnableMethodSecurity - Enable @PreAuthorize on methods
  * 
- *                Spring processes @Configuration classes at startup and:
- *                1. Finds all @Bean methods
- *                2. Calls each method ONCE
- *                3. Stores the returned objects in the Application Context
- *                4. These objects can now be @Autowired anywhere
+ * =====================================================
+ * SECURITY FILTER ORDER
+ * =====================================================
  * 
- *                =====================================================
- *                WHAT IS @Bean?
- *                =====================================================
+ * Order matters! Our filter chain:
+ * 1. CORS filter (if enabled)
+ * 2. JwtAuthenticationFilter (our custom filter) ◄── Added here
+ * 3. UsernamePasswordAuthenticationFilter (for form login, not used)
+ * 4. ExceptionTranslationFilter
+ * 5. AuthorizationFilter (final check)
  * 
- * @Bean marks a method that CREATES a Spring-managed object.
- * 
- *       The method name becomes the bean name (by default).
- *       The return type determines which type requests this bean satisfies.
- * 
- *       Example:
- * @Bean
- *       public PasswordEncoder passwordEncoder() { ... }
- * 
- *       This creates a bean:
- *       - Name: "passwordEncoder"
- *       - Type: PasswordEncoder
- *       - Singleton: Only ONE instance exists
- * 
- *       Now anywhere you @Autowire PasswordEncoder, you get this instance!
- * 
- *       =====================================================
- *       WHY USE @Configuration + @Bean?
- *       =====================================================
- * 
- *       Use @Configuration/@Bean when:
- *       - You can't annotate the class (it's from a library)
- *       - You need to customize how the object is created
- *       - You want to create multiple beans of the same type
- * 
- *       Use @Component/@Service/@Repository when:
- *       - You wrote the class yourself
- *       - Default constructor is fine
- *       - Only one instance is needed
+ * We add JwtAuthenticationFilter BEFORE UsernamePasswordAuthenticationFilter
+ * so JWT validation happens early in the chain.
  */
 @Configuration
-@EnableWebSecurity // Enables Spring Security's web security support
+@EnableWebSecurity
+@EnableMethodSecurity // Enables @PreAuthorize, @Secured, @RolesAllowed on methods
+@RequiredArgsConstructor
 public class SecurityConfig {
+
+    private final JwtAuthenticationFilter jwtAuthFilter;
+    private final UserDetailsService userDetailsService;
 
     /**
      * =====================================================
-     * SECURITY FILTER CHAIN - The Core of Spring Security
+     * SECURITY FILTER CHAIN
      * =====================================================
      * 
-     * SecurityFilterChain defines HOW to secure HTTP requests.
-     * 
-     * Spring Security works by adding FILTERS to the request pipeline:
-     * Request → [Security Filters] → Controller → Response
-     * 
-     * These filters check:
-     * - Is the user authenticated?
-     * - Is the user authorized for this endpoint?
-     * - Is CSRF protection needed?
-     * - etc.
-     * 
-     * By DEFAULT, Spring Security:
-     * ❌ Blocks ALL requests (returns 401 Unauthorized)
-     * ❌ Enables CSRF protection
-     * ❌ Requires login for everything
-     * 
-     * For development/testing, we OVERRIDE this to permit all requests.
-     * ⚠️ WARNING: In Week 2, we'll add proper JWT authentication!
-     * 
-     * @param http The HttpSecurity builder
-     * @return Configured SecurityFilterChain
+     * This is the main configuration that defines:
+     * - Which endpoints are public
+     * - Which endpoints require authentication
+     * - How authentication is performed
+     * - Session management policy
      */
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-                // Disable CSRF for now (needed for POST/PUT/DELETE from REST clients)
-                // We'll use JWT tokens instead of CSRF tokens for API security
+                // Disable CSRF - not needed for stateless JWT authentication
+                // CSRF protection is for cookie-based auth to prevent cross-site attacks
+                // With JWT in headers, CSRF is not a concern
                 .csrf(AbstractHttpConfigurer::disable)
 
                 // Configure authorization rules
                 .authorizeHttpRequests(auth -> auth
-                        // Permit ALL requests for now (development mode)
-                        // In Week 2, we'll change this to:
-                        // .requestMatchers("/api/v1/auth/**").permitAll()
-                        // .anyRequest().authenticated()
-                        .anyRequest().permitAll());
+                        // PUBLIC ENDPOINTS (no authentication required)
+                        // ---------------------------------------------
+                        // Auth endpoints - login and register must be public!
+                        .requestMatchers("/api/v1/auth/**").permitAll()
+
+                        // H2 Console - for development only
+                        .requestMatchers("/h2-console/**").permitAll()
+
+                        // Actuator health endpoint (for load balancers)
+                        .requestMatchers("/actuator/health").permitAll()
+
+                        // Swagger/OpenAPI documentation (will add later)
+                        .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
+
+                        // PROTECTED ENDPOINTS (authentication required)
+                        // ---------------------------------------------
+                        // All other requests require authentication
+                        .anyRequest().authenticated())
+
+                // Session Management - STATELESS for JWT
+                // No server-side sessions are created or used
+                // Each request is independent and authenticated via JWT
+                .sessionManagement(session -> session
+                        .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+
+                // Set our custom authentication provider
+                .authenticationProvider(authenticationProvider())
+
+                // Add JWT filter BEFORE UsernamePasswordAuthenticationFilter
+                // This ensures JWT is validated early in the filter chain
+                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
+
+                // Allow H2 console frames (H2 console uses iframes)
+                .headers(headers -> headers.frameOptions(frame -> frame.sameOrigin()));
 
         return http.build();
     }
 
     /**
      * =====================================================
-     * PASSWORD ENCODER BEAN
+     * AUTHENTICATION PROVIDER
      * =====================================================
      * 
-     * Creates a BCryptPasswordEncoder for hashing passwords.
+     * DaoAuthenticationProvider connects:
+     * - UserDetailsService (loads user from database)
+     * - PasswordEncoder (compares passwords)
      * 
-     * WHAT IS BCrypt?
+     * When AuthenticationManager.authenticate() is called:
+     * 1. Provider calls UserDetailsService.loadUserByUsername()
+     * 2. Provider calls PasswordEncoder.matches(rawPassword, hashedPassword)
+     * 3. If both succeed, returns authenticated user
+     * 4. If either fails, throws BadCredentialsException
      * 
-     * BCrypt is a password hashing algorithm that:
-     * 1. Is SLOW (intentionally!) - makes brute force attacks expensive
-     * 2. Uses a SALT - prevents rainbow table attacks
-     * 3. Is ADAPTIVE - can increase difficulty over time
+     * Spring Security 7.0 Note: DaoAuthenticationProvider now takes
+     * UserDetailsService
+     * in the constructor rather than via setter.
+     */
+    @Bean
+    public AuthenticationProvider authenticationProvider() {
+        // Spring Security 7.0+: Use constructor injection
+        DaoAuthenticationProvider authProvider = new DaoAuthenticationProvider(userDetailsService);
+        authProvider.setPasswordEncoder(passwordEncoder());
+        return authProvider;
+    }
+
+    /**
+     * =====================================================
+     * AUTHENTICATION MANAGER
+     * =====================================================
      * 
-     * How it works:
-     * Input: "MyPassword123"
-     * Output: "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"
-     * |__|___|____________________________________________________|
-     * Version Cost Factor Hashed Password
-     * (2a) (10 rounds) (includes salt + hash)
+     * AuthenticationManager is the main entry point for authentication.
+     * It delegates to one or more AuthenticationProviders.
      * 
-     * The "10" is the cost factor (2^10 = 1024 hash iterations).
-     * Higher = more secure but slower. 10 is a good default.
-     * 
-     * WHY NOT plain hashes like MD5 or SHA?
-     * MD5("password") = "5f4dcc3b5aa765d61d8327deb882cf99" (always same!)
-     * BCrypt("password") = "$2a$10$..." (different every time due to salt!)
-     * 
-     * Same password, different bcrypt results:
-     * BCrypt("test") → "$2a$10$Ab..."
-     * BCrypt("test") → "$2a$10$Xy..." (different salt!)
-     * 
-     * But BCrypt.matches("test", "$2a$10$Ab...") → true
-     * And BCrypt.matches("test", "$2a$10$Xy...") → true
-     * 
-     * The salt is embedded in the hash, so verification still works!
+     * We use Spring's default configuration which picks up our
+     * AuthenticationProvider bean automatically.
+     */
+    @Bean
+    public AuthenticationManager authenticationManager(AuthenticationConfiguration config)
+            throws Exception {
+        return config.getAuthenticationManager();
+    }
+
+    /**
+     * Password encoder bean - BCrypt for secure password hashing.
      */
     @Bean
     public PasswordEncoder passwordEncoder() {
-        // Create BCrypt encoder with default strength (10)
-        // Strength can be 4-31, higher = more secure but slower
-        // 10 is recommended for most applications
         return new BCryptPasswordEncoder();
     }
 }
