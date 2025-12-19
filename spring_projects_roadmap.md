@@ -8,119 +8,123 @@
 # 🎯 Phase 1: Foundation (Weeks 1-2)
 **Goal**: Build a monolithic version with core security
 
-## Week 1: Setup & Basic Security
+## Week 1: Setup & Basic Security ✅ COMPLETED
 
 ### Tasks
-- [ ] Initialize Spring Boot projects (start.spring.io)
-- [ ] Setup PostgreSQL/MySQL databases
-- [ ] Create basic entity models (User, Product/Patient, Order/Appointment)
-- [ ] Implement basic CRUD operations
+- [x] Initialize Spring Boot projects (start.spring.io)
+- [x] Setup PostgreSQL/MySQL databases (Using H2 for development)
+- [x] Create basic entity models (User with Role enum)
+- [x] Implement basic CRUD operations
 
 ### Security Implementation
-- [ ] **Spring Security basic setup**
-  - Configure SecurityFilterChain
-  - Password encoding with BCryptPasswordEncoder
-  - In-memory user details for testing
+- [x] **Spring Security basic setup**
+  - Configure SecurityFilterChain ✅
+  - Password encoding with BCryptPasswordEncoder ✅
+  - CustomUserDetailsService for loading users ✅
   
-- [ ] **Input Validation**
-  - Add @Valid and @Validated annotations
-  - Create custom validators
-  - Bean Validation (JSR-380) with constraints
+- [x] **Input Validation**
+  - Add @Valid and @Validated annotations ✅
+  - Bean Validation (JSR-380) with constraints ✅
+  - Custom validation messages ✅
 
-- [ ] **SQL Injection Prevention**
-  - Use Spring Data JPA (automatic parameterization)
-  - Never concatenate SQL strings
-  - Use @Query with named parameters
+- [x] **SQL Injection Prevention**
+  - Use Spring Data JPA (automatic parameterization) ✅
+  - Use @Query with named parameters ✅
 
 ### API Design
-- [ ] **RESTful Endpoints**
+- [x] **RESTful Endpoints**
   ```
-  POST   /api/users          - Create
-  GET    /api/users/{id}     - Read
-  GET    /api/users          - List
-  PUT    /api/users/{id}     - Update
-  DELETE /api/users/{id}     - Delete
+  POST   /api/v1/users          - Create ✅
+  GET    /api/v1/users/{id}     - Read ✅
+  GET    /api/v1/users          - List ✅
+  PUT    /api/v1/users/{id}     - Update ✅
+  DELETE /api/v1/users/{id}     - Disable (soft delete) ✅
+  PATCH  /api/v1/users/{id}/enable|lock|unlock ✅
+  GET    /api/v1/users/email/{email} ✅
+  GET    /api/v1/users/role/{role} ✅
+  GET    /api/v1/users/search?name= ✅
+  GET    /api/v1/users/check-email?email= ✅
   ```
 
-- [ ] **Request/Response DTOs**
-  - Create separate DTOs for requests and responses
-  - Use MapStruct for entity-DTO mapping
-  - Add validation annotations (@NotNull, @Email, @Size)
+- [x] **Request/Response DTOs**
+  - UserRegistrationRequest ✅
+  - UserResponse (excludes password!) ✅
+  - UserUpdateRequest ✅
+  - UserMapper for entity-DTO conversion ✅
+  - Validation annotations (@NotNull, @Email, @Size) ✅
 
-- [ ] **Exception Handling**
-  - Create @ControllerAdvice class
-  - Handle common exceptions (ResourceNotFoundException, ValidationException)
-  - Return consistent error format
+- [x] **Exception Handling**
+  - GlobalExceptionHandler with @ControllerAdvice ✅
+  - ResourceNotFoundException ✅
+  - DuplicateResourceException ✅
+  - InvalidCredentialsException ✅
+  - RFC 7807 compliant ApiError DTO ✅
 
 ### Code Quality
-- [ ] **Project Structure**
+- [x] **Project Structure**
   ```
-  src/main/java/com/project/
-  ├── controller/
-  ├── service/
-  ├── repository/
-  ├── model/entity/
-  ├── model/dto/
-  ├── mapper/
-  ├── exception/
-  └── config/
+  src/main/java/com/ganainy/authservice/
+  ├── controller/     (UserController, AuthController) ✅
+  ├── service/        (UserService, AuthenticationService) ✅
+  ├── repository/     (UserRepository) ✅
+  ├── model/entity/   (User, Role enum) ✅
+  ├── model/dto/      (Request/Response DTOs) ✅
+  ├── mapper/         (UserMapper) ✅
+  ├── exception/      (GlobalExceptionHandler, custom exceptions) ✅
+  ├── security/       (JwtService, JwtAuthenticationFilter) ✅
+  └── config/         (SecurityConfig) ✅
   ```
 
-- [ ] **Lombok Setup**
-  - Add @Data, @Builder, @NoArgsConstructor, @AllArgsConstructor
-  - Use @Slf4j for logging
+- [x] **Lombok Setup**
+  - @Data, @Builder, @NoArgsConstructor, @AllArgsConstructor ✅
+  - @Slf4j for logging ✅
+  - @RequiredArgsConstructor for constructor injection ✅
 
-**Deliverable**: Working monolithic app with basic CRUD + authentication
+**Deliverable**: Working monolithic app with basic CRUD + authentication ✅
 
 ---
 
-## Week 2: JWT Authentication & Advanced API Design
+## Week 2: JWT Authentication & Advanced API Design 🔄 IN PROGRESS
 
 ### Security Implementation
-- [ ] **JWT Token Authentication**
-  - Create JWT utility class (generate, validate, extract claims)
-  - Implement JwtAuthenticationFilter
-  - Add login endpoint returning JWT
-  - Secure endpoints with @PreAuthorize
+- [x] **JWT Token Authentication**
+  - JwtService utility class (generate, validate, extract claims) ✅
+  - JwtAuthenticationFilter ✅
+  - Login endpoint returning JWT (`POST /api/v1/auth/login`) ✅
+  - Register endpoint (`POST /api/v1/auth/register`) ✅
+  - Protected endpoints require valid JWT ✅
+  - [ ] Secure endpoints with @PreAuthorize (role-based)
 
 - [ ] **CORS Configuration**
-  ```java
-  @Configuration
-  public class CorsConfig {
-      @Bean
-      public CorsFilter corsFilter() {
-          // Configure allowed origins, methods, headers
-      }
-  }
-  ```
+  - Configure allowed origins, methods, headers
 
 - [ ] **XSS Protection**
   - Implement input sanitization filter
-  - Use OWASP Java HTML Sanitizer
-  - Set security headers (X-XSS-Protection, Content-Security-Policy)
+  - Set security headers
 
 ### API Design
-- [ ] **HTTP Status Codes**
-  - 200 OK, 201 Created, 204 No Content
-  - 400 Bad Request, 401 Unauthorized, 403 Forbidden, 404 Not Found
-  - 500 Internal Server Error
+- [x] **HTTP Status Codes**
+  - 200 OK, 201 Created, 204 No Content ✅
+  - 400 Bad Request, 401 Unauthorized, 403 Forbidden, 404 Not Found ✅
+  - 409 Conflict (duplicate resources) ✅
+  - 500 Internal Server Error ✅
 
-- [ ] **RFC 7807 Problem Details**
-  ```java
+- [x] **RFC 7807 Problem Details** ✅
+  ```json
   {
-    "type": "https://api.example.com/errors/validation",
+    "type": "https://api.healthcare.com/errors/validation-failed",
     "title": "Validation Failed",
     "status": 400,
-    "detail": "Email is required",
-    "instance": "/api/users",
-    "timestamp": "2024-01-15T10:30:00Z"
+    "detail": "One or more fields have validation errors",
+    "instance": "/api/v1/users",
+    "timestamp": "2024-01-15T10:30:00Z",
+    "errors": [{"field": "email", "message": "..."}]
   }
   ```
 
 - [ ] **Pagination & Filtering**
   - Use Pageable in controller methods
   - Return Page<DTO> with metadata
-  - Implement @FilterBy and @SortBy custom annotations
 
 - [ ] **OpenAPI/Swagger Documentation**
   - Add springdoc-openapi dependency
@@ -137,7 +141,6 @@
 - [ ] **Actuator Setup**
   - Enable health, info, metrics endpoints
   - Secure actuator endpoints
-  - Add custom health indicators
 
 **Deliverable**: Secure monolithic app with JWT, comprehensive API docs
 
