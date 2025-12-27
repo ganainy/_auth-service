@@ -17,53 +17,56 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 
 /**
- * JwtAuthenticationFilter - Intercepts requests and validates JWT tokens.
+ * JwtAuthenticationFilter - Validates JWT tokens on every request.
  * 
  * =====================================================
- * HOW THE FILTER CHAIN WORKS
+ * WHAT IS A FILTER?
  * =====================================================
  * 
- * When a request comes in, it passes through multiple filters:
+ * A Filter is code that runs BEFORE your controller receives a request.
+ * Filters are part of the Servlet specification (not Spring-specific).
  * 
- * HTTP Request
+ * Request Flow:
+ * Client → [Filter 1] → [Filter 2] → [Filter N] → Controller
  * ↓
- * [CORS Filter]
- * ↓
- * [CSRF Filter]
- * ↓
- * [JwtAuthenticationFilter] ← WE ARE HERE
- * ↓
- * [UsernamePasswordAuthenticationFilter]
- * ↓
- * [Other Spring Security Filters...]
- * ↓
- * Your Controller
+ * Client ← [Filter 1] ← [Filter 2] ← [Filter N] ← Controller
  * 
- * Our filter runs BEFORE the standard authentication filters.
- * If we find a valid JWT, we authenticate the user ourselves.
+ * Each filter can:
+ * - Inspect/modify the request
+ * - Reject the request (don't call next filter)
+ * - Inspect/modify the response
+ * - Perform logging, authentication, etc.
  * 
  * =====================================================
- * WHAT THIS FILTER DOES
+ * SPRING SECURITY FILTER CHAIN
  * =====================================================
  * 
- * 1. Extract the Authorization header from the request
- * 2. Check if it's a Bearer token (starts with "Bearer ")
- * 3. Extract and validate the JWT
- * 4. If valid, load the user and set up authentication
- * 5. Continue the filter chain
+ * Spring Security adds many filters automatically:
+ * 1. SecurityContextPersistenceFilter - Load/save security context
+ * 2. UsernamePasswordAuthenticationFilter - Form login
+ * 3. BasicAuthenticationFilter - HTTP Basic auth
+ * 4. JwtAuthenticationFilter - OUR FILTER (custom)
+ * 5. ExceptionTranslationFilter - Convert auth exceptions
+ * 6. FilterSecurityInterceptor - Final authorization check
+ * 
+ * Our filter runs BEFORE the authorization check to:
+ * 1. Extract the JWT from the Authorization header
+ * 2. Validate the token (signature, expiration)
+ * 3. Load the user from the database
+ * 4. Set up Spring Security's "authentication" context
  * 
  * =====================================================
  * OncePerRequestFilter
  * =====================================================
  * 
- * We extend OncePerRequestFilter to ensure this filter only runs
- * ONCE per request (even if the request is forwarded internally).
+ * We extend OncePerRequestFilter to ensure our filter runs
+ * exactly ONCE per request (even if request is forwarded).
  * 
- * Without this, the filter might run multiple times for a single
- * request, which could cause issues.
+ * Without this, a request could be filtered multiple times
+ * during internal redirects, causing issues.
  */
 @Component
-@RequiredArgsConstructor // Lombok: generates constructor for final fields
+@RequiredArgsConstructor
 @Slf4j
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
@@ -71,11 +74,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final UserDetailsService userDetailsService;
 
     /**
-     * Main filter logic - runs for every HTTP request.
+     * Main filter method - runs on EVERY request.
      * 
-     * @param request     The HTTP request
-     * @param response    The HTTP response
-     * @param filterChain The chain of filters to continue
+     * This method:
+     * 1. Extracts JWT from Authorization header
+     * 2. Validates the token
+     * 3. Loads user details
+     * 4. Sets up security context (tells Spring Security: "user is authenticated")
+     * 5. Continues to the next filter
+     * 
+     * @param request     HTTP request
+     * @param response    HTTP response
+     * @param filterChain Chain of remaining filters to execute
      */
     @Override
     protected void doFilterInternal(
@@ -83,71 +93,80 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             HttpServletResponse response,
             FilterChain filterChain) throws ServletException, IOException {
 
-        // ========== STEP 1: Get the Authorization header ==========
+        // =========================================
+        // STEP 1: Extract Authorization header
+        // =========================================
         final String authHeader = request.getHeader("Authorization");
 
-        // If no Authorization header or not a Bearer token, skip this filter
-        // The request will continue to other filters and may fail authentication
+        // Check if Authorization header exists and starts with "Bearer "
+        // Format: "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9..."
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-            log.debug("No Bearer token found in Authorization header");
+            // No valid auth header - continue without authentication
+            // This is OK for public endpoints (like /api/v1/auth/login)
+            // Protected endpoints will be rejected later by Spring Security
             filterChain.doFilter(request, response);
             return;
         }
 
-        // ========== STEP 2: Extract the JWT token ==========
-        // Format: "Bearer eyJhbGciOiJIUzI1NiJ9..."
-        // We want just the token part (after "Bearer ")
-        final String jwt = authHeader.substring(7);
+        // =========================================
+        // STEP 2: Extract the token (remove "Bearer " prefix)
+        // =========================================
+        final String jwt = authHeader.substring(7); // "Bearer ".length() = 7
 
-        log.debug("JWT token found, attempting to validate");
+        log.debug("JWT found in request to: {}", request.getRequestURI());
 
         try {
-            // ========== STEP 3: Extract username from token ==========
+            // =========================================
+            // STEP 3: Extract username from token
+            // =========================================
             final String userEmail = jwtService.extractUsername(jwt);
 
-            // ========== STEP 4: Validate and authenticate ==========
-            // Only process if:
-            // 1. We extracted a username from the token
-            // 2. User is not already authenticated
+            // =========================================
+            // STEP 4: Validate and authenticate
+            // =========================================
+            // Only authenticate if:
+            // - We extracted a username
+            // - User is not already authenticated (context is empty)
             if (userEmail != null && SecurityContextHolder.getContext().getAuthentication() == null) {
 
-                // Load user from database (or in-memory storage)
+                // Load user from database
                 UserDetails userDetails = this.userDetailsService.loadUserByUsername(userEmail);
 
                 // Validate the token against the user
                 if (jwtService.isTokenValid(jwt, userDetails)) {
-                    log.debug("JWT token is valid for user: {}", userEmail);
 
-                    // ========== STEP 5: Create authentication token ==========
-                    // UsernamePasswordAuthenticationToken represents a successful authentication
-                    // Parameters: principal (user), credentials (null for JWT), authorities (roles)
+                    // =========================================
+                    // STEP 5: Set up authentication context
+                    // =========================================
+                    // Create an authentication token (not JWT, but Spring's auth object)
                     UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
-                            userDetails,
-                            null, // Credentials not needed after authentication
-                            userDetails.getAuthorities());
+                            userDetails, // Principal (the authenticated user)
+                            null, // Credentials (null - we used JWT, not password)
+                            userDetails.getAuthorities() // Authorities (ROLE_DOCTOR, etc.)
+                    );
 
                     // Add request details (IP address, session ID, etc.)
-                    authToken.setDetails(
-                            new WebAuthenticationDetailsSource().buildDetails(request));
+                    authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
 
-                    // ========== STEP 6: Set authentication in SecurityContext ==========
-                    // This is THE KEY step - it tells Spring Security the user is authenticated
-                    // All subsequent security checks will use this authentication
+                    // Set the authentication in the security context
+                    // This tells Spring Security: "This user is authenticated!"
                     SecurityContextHolder.getContext().setAuthentication(authToken);
 
-                    log.info("User {} authenticated successfully via JWT", userEmail);
+                    log.debug("User authenticated: {} with authorities: {}",
+                            userEmail, userDetails.getAuthorities());
                 } else {
                     log.warn("Invalid JWT token for user: {}", userEmail);
                 }
             }
         } catch (Exception e) {
-            // Token parsing failed - could be expired, malformed, wrong signature, etc.
-            log.warn("JWT authentication failed: {}", e.getMessage());
-            // Don't throw - let the request continue (will fail at authorization if needed)
+            log.warn("Could not set user authentication in security context: {}", e.getMessage());
+            // Don't throw - just continue without authentication
+            // Spring Security will reject the request if endpoint requires auth
         }
 
-        // ========== STEP 7: Continue the filter chain ==========
-        // Whether we authenticated or not, pass the request to the next filter
+        // =========================================
+        // STEP 6: Continue to the next filter
+        // =========================================
         filterChain.doFilter(request, response);
     }
 }

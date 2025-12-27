@@ -11,6 +11,7 @@ import org.springframework.security.config.annotation.authentication.configurati
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -19,67 +20,103 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 /**
- * SecurityConfig - Central configuration for Spring Security with JWT.
+ * SecurityConfig - Complete Spring Security configuration with JWT.
  * 
  * =====================================================
- * WEEK 2 UPGRADE: JWT AUTHENTICATION
+ * WHAT CHANGED FROM WEEK 1?
  * =====================================================
  * 
- * Changes from Week 1:
- * - Removed: InMemoryUserDetailsManager (test users)
- * - Removed: HTTP Basic authentication
- * - Added: JWT token authentication
- * - Added: CustomUserDetailsService (loads users from database)
- * - Added: JwtAuthenticationFilter (validates JWT tokens)
- * - Added: AuthenticationManager (for login endpoint)
+ * Week 1: permitAll() for everything (no authentication)
+ * Week 2: Proper JWT-based authentication with protected endpoints
+ * 
+ * Key additions:
+ * 1. JwtAuthenticationFilter - Validates JWT on every request
+ * 2. AuthenticationManager - Handles login credential verification
+ * 3. AuthenticationProvider - Connects UserDetailsService + PasswordEncoder
+ * 4. SessionCreationPolicy.STATELESS - No server-side sessions (JWT is
+ * stateless)
+ * 5. @EnableMethodSecurity - Enable @PreAuthorize on methods
  * 
  * =====================================================
- * AUTHENTICATION FLOW (NEW)
+ * SECURITY FILTER ORDER
  * =====================================================
  * 
- * 1. User calls POST /api/auth/login with email/password
- * 2. AuthenticationManager validates credentials via DaoAuthenticationProvider
- * 3. If valid, server generates JWT token
- * 4. Client includes token in future requests: Authorization: Bearer <token>
- * 5. JwtAuthenticationFilter validates token and sets up SecurityContext
+ * Order matters! Our filter chain:
+ * 1. CORS filter (if enabled)
+ * 2. JwtAuthenticationFilter (our custom filter) ◄── Added here
+ * 3. UsernamePasswordAuthenticationFilter (for form login, not used)
+ * 4. ExceptionTranslationFilter
+ * 5. AuthorizationFilter (final check)
  * 
- * =====================================================
- * FILTER CHAIN ORDER
- * =====================================================
- * 
- * HTTP Request
- * ↓
- * [JwtAuthenticationFilter] ← NEW! Added before UsernamePasswordFilter
- * ↓
- * [UsernamePasswordAuthenticationFilter] (not used directly anymore)
- * ↓
- * [Other Spring Security Filters...]
- * ↓
- * Your Controller
+ * We add JwtAuthenticationFilter BEFORE UsernamePasswordAuthenticationFilter
+ * so JWT validation happens early in the chain.
  */
 @Configuration
 @EnableWebSecurity
-@EnableMethodSecurity // Enables @PreAuthorize, @PostAuthorize, @Secured annotations
+@EnableMethodSecurity // Enables @PreAuthorize, @Secured, @RolesAllowed on methods
 @RequiredArgsConstructor
 public class SecurityConfig {
 
-        // Injected by Spring (CustomUserDetailsService)
+        private final JwtAuthenticationFilter jwtAuthFilter;
         private final UserDetailsService userDetailsService;
-
-        // Injected by Spring (our JWT filter)
-        private final JwtAuthenticationFilter jwtAuthenticationFilter;
 
         /**
          * =====================================================
-         * PASSWORD ENCODER
+         * SECURITY FILTER CHAIN
          * =====================================================
          * 
-         * BCrypt is used for hashing passwords.
-         * Same as Week 1 - this doesn't change with JWT.
+         * This is the main configuration that defines:
+         * - Which endpoints are public
+         * - Which endpoints require authentication
+         * - How authentication is performed
+         * - Session management policy
          */
         @Bean
-        public PasswordEncoder passwordEncoder() {
-                return new BCryptPasswordEncoder();
+        public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+                http
+                                // Disable CSRF - not needed for stateless JWT authentication
+                                // CSRF protection is for cookie-based auth to prevent cross-site attacks
+                                // With JWT in headers, CSRF is not a concern
+                                .csrf(AbstractHttpConfigurer::disable)
+
+                                // Configure authorization rules
+                                .authorizeHttpRequests(auth -> auth
+                                                // PUBLIC ENDPOINTS (no authentication required)
+                                                // ---------------------------------------------
+                                                // Auth endpoints - login and register must be public!
+                                                .requestMatchers("/api/v1/auth/**").permitAll()
+
+                                                // H2 Console - for development only
+                                                .requestMatchers("/h2-console/**").permitAll()
+
+                                                // Actuator health endpoint (for load balancers)
+                                                .requestMatchers("/actuator/health").permitAll()
+
+                                                // Swagger/OpenAPI documentation (will add later)
+                                                .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
+
+                                                // PROTECTED ENDPOINTS (authentication required)
+                                                // ---------------------------------------------
+                                                // All other requests require authentication
+                                                .anyRequest().authenticated())
+
+                                // Session Management - STATELESS for JWT
+                                // No server-side sessions are created or used
+                                // Each request is independent and authenticated via JWT
+                                .sessionManagement(session -> session
+                                                .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+
+                                // Set our custom authentication provider
+                                .authenticationProvider(authenticationProvider())
+
+                                // Add JWT filter BEFORE UsernamePasswordAuthenticationFilter
+                                // This ensures JWT is validated early in the filter chain
+                                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
+
+                                // Allow H2 console frames (H2 console uses iframes)
+                                .headers(headers -> headers.frameOptions(frame -> frame.sameOrigin()));
+
+                return http.build();
         }
 
         /**
@@ -87,23 +124,25 @@ public class SecurityConfig {
          * AUTHENTICATION PROVIDER
          * =====================================================
          * 
-         * DaoAuthenticationProvider is a standard Spring Security component that:
-         * 1. Uses UserDetailsService to load user from database
-         * 2. Uses PasswordEncoder to verify the password
-         * 3. Returns authenticated user if credentials are valid
+         * DaoAuthenticationProvider connects:
+         * - UserDetailsService (loads user from database)
+         * - PasswordEncoder (compares passwords)
          * 
-         * This is used by the AuthenticationManager during login.
+         * When AuthenticationManager.authenticate() is called:
+         * 1. Provider calls UserDetailsService.loadUserByUsername()
+         * 2. Provider calls PasswordEncoder.matches(rawPassword, hashedPassword)
+         * 3. If both succeed, returns authenticated user
+         * 4. If either fails, throws BadCredentialsException
          * 
-         * Note: Spring Security 7.0 requires passing UserDetailsService to constructor.
+         * Spring Security 7.0 Note: DaoAuthenticationProvider now takes
+         * UserDetailsService
+         * in the constructor rather than via setter.
          */
         @Bean
         public AuthenticationProvider authenticationProvider() {
-                // Spring Security 7.0 requires UserDetailsService in constructor
+                // Spring Security 7.0+: Use constructor injection
                 DaoAuthenticationProvider authProvider = new DaoAuthenticationProvider(userDetailsService);
-
-                // Set the password encoder for password verification
                 authProvider.setPasswordEncoder(passwordEncoder());
-
                 return authProvider;
         }
 
@@ -113,72 +152,22 @@ public class SecurityConfig {
          * =====================================================
          * 
          * AuthenticationManager is the main entry point for authentication.
-         * It delegates to AuthenticationProvider(s) to perform the actual work.
+         * It delegates to one or more AuthenticationProviders.
          * 
-         * We need this bean to be able to inject it into AuthService
-         * for the login endpoint.
+         * We use Spring's default configuration which picks up our
+         * AuthenticationProvider bean automatically.
          */
         @Bean
-        public AuthenticationManager authenticationManager(AuthenticationConfiguration config) throws Exception {
+        public AuthenticationManager authenticationManager(AuthenticationConfiguration config)
+                        throws Exception {
                 return config.getAuthenticationManager();
         }
 
         /**
-         * =====================================================
-         * SECURITY FILTER CHAIN
-         * =====================================================
-         * 
-         * Main security configuration:
-         * - Disable CSRF (stateless API)
-         * - Configure public vs protected endpoints
-         * - Add JWT filter before UsernamePasswordAuthenticationFilter
-         * - Use stateless session management
+         * Password encoder bean - BCrypt for secure password hashing.
          */
         @Bean
-        public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
-                http
-                                // ========== CSRF ==========
-                                // Disabled for stateless REST API
-                                .csrf(csrf -> csrf.disable())
-
-                                // ========== Authorization Rules ==========
-                                .authorizeHttpRequests(auth -> auth
-                                                // ===== PUBLIC ENDPOINTS =====
-                                                // These can be accessed without authentication
-                                                .requestMatchers(
-                                                                "/api/auth/**", // Login, register
-                                                                "/api/users/exists", // Check email exists
-                                                                "/actuator/health", // Health check
-                                                                "/actuator/info", // App info
-                                                                "/error", // Error pages
-                                                                "/swagger-ui/**", // Swagger UI (future)
-                                                                "/v3/api-docs/**" // OpenAPI docs (future)
-                                                ).permitAll()
-
-                                                // ===== ADMIN-ONLY ENDPOINTS =====
-                                                .requestMatchers("/api/admin/**").hasRole("ADMIN")
-
-                                                // ===== AUTHENTICATED ENDPOINTS =====
-                                                .requestMatchers("/api/users/**").authenticated()
-
-                                                // ===== ALL OTHER ENDPOINTS =====
-                                                .anyRequest().authenticated())
-
-                                // ========== Session Management ==========
-                                // STATELESS - no server-side session
-                                // Each request is authenticated independently via JWT
-                                .sessionManagement(session -> session
-                                                .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-
-                                // ========== Authentication Provider ==========
-                                // Use our DaoAuthenticationProvider
-                                .authenticationProvider(authenticationProvider())
-
-                                // ========== JWT Filter ==========
-                                // Add our JWT filter BEFORE the UsernamePasswordAuthenticationFilter
-                                // This ensures JWT tokens are processed first
-                                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
-
-                return http.build();
+        public PasswordEncoder passwordEncoder() {
+                return new BCryptPasswordEncoder();
         }
 }
